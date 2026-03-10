@@ -14,7 +14,7 @@
 ## 📦 安装方法
 
 1. 安装 [Tampermonkey](https://www.tampermonkey.net/) 或 [Violentmonkey](https://violentmonkey.github.io/) 浏览器扩展
-2. 点击 [安装脚本](./UrlPureFly.user.js)
+2. 点击 [安装脚本](https://github.com/ChitoseRaame/UrlPureFly/raw/refs/heads/master/UrlPureFly.user.js)
 3. 确认安装
 
 ## 🚀 使用方法
