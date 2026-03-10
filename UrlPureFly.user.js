@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         UrlPureFly - URL净化助手
-// @namespace    UrlPureFly
+// @namespace    https://github.com/ChitoseRaame/UrlPureFly
 // @version      1.1.0
 // @description  一键净化当前网页的跟踪URL参数，支持多种净化规则，可自定义按钮位置
 // @author       ChitoseRaame
