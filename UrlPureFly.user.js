@@ -4,6 +4,7 @@
 // @version      2.0.0
 // @description  一键净化当前网页的跟踪URL参数，支持pURLfy规则格式，可自定义按钮位置
 // @author       ChitoseRaame
+// @icon         https://github.com/ChitoseRaame/UrlPureFly/raw/refs/heads/master/favicon.ico
 // @match        *://*/*
 // @grant        GM_addStyle
 // @grant        GM_getValue
