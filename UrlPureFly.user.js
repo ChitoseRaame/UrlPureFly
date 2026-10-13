@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         UrlPureFly - URL净化助手
 // @namespace    https://github.com/ChitoseRaame/UrlPureFly
-// @version      2.0.0
+// @version      2.1.0
 // @description  一键净化当前网页的跟踪URL参数，支持pURLfy规则格式，可自定义按钮位置
 // @author       ChitoseRaame
 // @icon         https://github.com/ChitoseRaame/UrlPureFly/raw/refs/heads/master/favicon.ico
@@ -25,6 +25,11 @@
      */
     let createdButtons = [];
     const DEFAULT_SETTINGS = { buttonPositions: ['top-right'] };
+
+    // 单击/双击判定窗口状态，由全局点击调度器 handleButtonClick 统一维护
+    let clickTimer = null;              // 单击延迟判定定时器句柄
+    let clickCount = 0;                 // 当前判定窗口内的点击次数
+    const DOUBLE_CLICK_DELAY = 300;     // 双击判定窗口(ms)
 
     /* =========================================================================
      * 1. 油猴层 - 核心逻辑 (Tampermonkey Logic)
@@ -50,6 +55,9 @@
 
         // 监听全屏状态，视频或网页全屏时自动隐去悬浮按钮以保证视觉沉浸感
         setupFullscreenListener();
+
+        // 首次使用引导：用户尚未确认过引导时，弹出用法说明面板（见第 5 节网页层 UI）
+        if (!GM_getValue('guideShown', false)) showGuidePanel();
     }
 
     /* =========================================================================
@@ -258,22 +266,52 @@
      * ========================================================================= */
 
     /**
-     * 执行核心净化逻辑：串联重定向探测与参数剥离，最终写入剪贴板
+     * 全局点击调度器：区分单击与双击（定时器窗口方案，不读取剪贴板）
+     * - 单击（300ms 内无第二次点击）→ 仅复制净化后的 URL
+     * - 双击（300ms 内出现第二次点击）→ 复制「标题 + 换行 + 净化后 URL」，并取消单击的待执行逻辑
      */
-    async function handlePurifyAndCopy() {
+    function handleButtonClick() {
+        clickCount++;
+
+        if (clickCount === 1) {
+            // 第一次点击：挂起一个 300ms 窗口，窗口内若出现第二次点击则该定时器被取消
+            clickTimer = setTimeout(() => {
+                clickTimer = null;
+                clickCount = 0;
+                handlePurifyAndCopy(false); // 触发单击逻辑：仅复制净化后的 URL
+            }, DOUBLE_CLICK_DELAY);
+        } else {
+            // 窗口内的第二次点击：撤销单击的待执行逻辑，立即执行双击逻辑（不会先复制一次 URL）
+            clearTimeout(clickTimer);
+            clickTimer = null;
+            clickCount = 0;
+            handlePurifyAndCopy(true); // 触发双击逻辑：复制「标题 + 换行 + 净化后 URL」
+        }
+    }
+
+    /**
+     * 执行核心净化逻辑：串联重定向探测与参数剥离，最终写入剪贴板
+     * @param {boolean} [withTitle=false] - 是否以「document.title + 换行 + 净化后URL」形式复制
+     */
+    async function handlePurifyAndCopy(withTitle = false) {
         const currentUrl = window.location.href;
 
         try {
             showToast('🔄 正在净化URL...', 'info');
 
-            // 依据预设的 RULESETS 进行多重清洗
+            // 依据预设的 RULESETS 进行多重清洗（两种模式均只净化一次）
             const purifiedUrl = await purifyUrl(currentUrl);
 
-            // 将纯净链接输出至剪贴板
-            const copySuccess = await copyToClipboard(purifiedUrl);
+            // 双击模式带上页面标题；单击模式仅复制链接
+            const textToCopy = withTitle ? `${document.title}\n${purifiedUrl}` : purifiedUrl;
+
+            // 将待复制文本输出至剪贴板
+            const copySuccess = await copyToClipboard(textToCopy);
 
             if (copySuccess) {
-                if (purifiedUrl !== currentUrl) {
+                if (withTitle) {
+                    showToast('✅ 标题与URL已复制到剪贴板', 'success');
+                } else if (purifiedUrl !== currentUrl) {
                     showToast('✅ URL已净化并复制到剪贴板', 'success');
                 } else {
                     showToast('ℹ️ URL无需净化，已复制原链接', 'info');
@@ -632,6 +670,35 @@
     }
 
     /**
+     * 首次使用引导：懒加载注入引导弹窗 DOM 并绑定确认事件
+     * 与设置面板区分使用独立 ID（guidePanel / guideOverlay），避免同时存在时冲突
+     */
+    function showGuidePanel() {
+        let panel = document.getElementById('UrlPureFly_guidePanel');
+
+        // 若引导 DOM 未初始化，则注入文档并绑定事件
+        if (!panel) {
+            document.body.insertAdjacentHTML('beforeend', GUIDE_HTML);
+            document.getElementById('UrlPureFly_guideConfirmBtn').addEventListener('click', () => {
+                GM_setValue('guideShown', true); // 持久化标记，刷新及后续页面不再弹窗
+                hideGuidePanel();
+            });
+            panel = document.getElementById('UrlPureFly_guidePanel');
+        }
+
+        panel.classList.add('show');
+        document.getElementById('UrlPureFly_guideOverlay').classList.add('show');
+    }
+
+    /**
+     * 隐藏引导弹窗及其遮罩层
+     */
+    function hideGuidePanel() {
+        document.getElementById('UrlPureFly_guidePanel')?.classList.remove('show');
+        document.getElementById('UrlPureFly_guideOverlay')?.classList.remove('show');
+    }
+
+    /**
      * 基于配置向网页内组装和派发“扫帚”悬浮按钮
      */
     function generateFixedButtons() {
@@ -673,7 +740,8 @@
                 Object.assign(button.style, styles[position] || styles['top-right']);
             }
 
-            button.addEventListener('click', handlePurifyAndCopy);
+            // 绑定全局点击调度器，由其区分单击/双击后再调用 handlePurifyAndCopy
+            button.addEventListener('click', handleButtonClick);
             document.body.appendChild(button);
             createdButtons.push(button);
         });
@@ -731,6 +799,30 @@
             <div class="UrlPureFly_settings-footer">
                 <button class="UrlPureFly_btn UrlPureFly_btn-cancel" id="UrlPureFly_settingsCancelBtn">取消</button>
                 <button class="UrlPureFly_btn UrlPureFly_btn-save" id="UrlPureFly_settingsSaveBtn">保存</button>
+            </div>
+        </div>
+    `;
+
+    /**
+     * 【首次使用引导 DOM 结构】
+     * 独立 ID（guideOverlay / guidePanel）与设置面板区分，class 复用 settings 的命名风格
+     */
+    const GUIDE_HTML = `
+        <div id="UrlPureFly_guideOverlay" class="UrlPureFly_settings-overlay"></div>
+        <div id="UrlPureFly_guidePanel" class="UrlPureFly_settings-panel">
+            <div class="UrlPureFly_settings-header">
+                <h2>🧹 欢迎使用 UrlPureFly</h2>
+            </div>
+            <div class="UrlPureFly_settings-body">
+                <div class="UrlPureFly_guide-list">
+                    <p>· 单击悬浮按钮：净化并复制链接</p>
+                    <p>· 快速双击悬浮按钮：复制「标题 + 链接」</p>
+                    <p>· 点击油猴菜单可调整按钮位置</p>
+                </div>
+                <div class="UrlPureFly_guide-tips">点击「我知道了」后不再提示</div>
+            </div>
+            <div class="UrlPureFly_settings-footer">
+                <button class="UrlPureFly_btn UrlPureFly_btn-save" id="UrlPureFly_guideConfirmBtn">我知道了</button>
             </div>
         </div>
     `;
@@ -845,6 +937,38 @@
         #UrlPureFly_settingsPanel .UrlPureFly_btn-cancel:hover { background: #e0e0e0; }
         #UrlPureFly_settingsPanel .UrlPureFly_btn-save { background: #667eea; color: white; }
         #UrlPureFly_settingsPanel .UrlPureFly_btn-save:hover { background: #5568d3; }
+
+        /* ----------------------- 5. 首次使用引导弹窗 ----------------------- */
+        /* 引导弹窗使用独立 ID，需单独补充样式，不能复用 settingsPanel 的 ID 选择器 */
+        #UrlPureFly_guideOverlay {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.5); z-index: 100001; display: none;
+        }
+        #UrlPureFly_guideOverlay.show { display: block; }
+
+        #UrlPureFly_guidePanel {
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 420px; max-width: 90vw; background: white; border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3); z-index: 100002;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; display: none;
+        }
+        #UrlPureFly_guidePanel.show { display: block; }
+
+        /* 引导面板头部 */
+        #UrlPureFly_guidePanel .UrlPureFly_settings-header { padding: 20px; border-bottom: 1px solid #e0e0e0; }
+        #UrlPureFly_guidePanel .UrlPureFly_settings-header h2 { margin: 0; font-size: 20px; color: #333; font-weight: 600; }
+
+        /* 引导面板内容与按钮 */
+        #UrlPureFly_guidePanel .UrlPureFly_settings-body { padding: 20px; }
+        #UrlPureFly_guidePanel .UrlPureFly_guide-list { display: flex; flex-direction: column; gap: 10px; }
+        #UrlPureFly_guidePanel .UrlPureFly_guide-list p { margin: 0; font-size: 14px; color: #333; line-height: 1.5; }
+        #UrlPureFly_guidePanel .UrlPureFly_guide-tips { margin-top: 16px; font-size: 12px; color: #999; text-align: center; }
+        #UrlPureFly_guidePanel .UrlPureFly_settings-footer {
+            padding: 20px; border-top: 1px solid #e0e0e0; display: flex; justify-content: flex-end;
+        }
+        #UrlPureFly_guidePanel .UrlPureFly_btn { padding: 10px 20px; border-radius: 6px; font-size: 14px; cursor: pointer; transition: all 0.2s; border: none; font-weight: 500; }
+        #UrlPureFly_guidePanel .UrlPureFly_btn-save { background: #667eea; color: white; }
+        #UrlPureFly_guidePanel .UrlPureFly_btn-save:hover { background: #5568d3; }
     `;
 
     /* =========================================================================
