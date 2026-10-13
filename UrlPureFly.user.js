@@ -15,6 +15,7 @@
 // @run-at       document-end
 // @downloadURL  https://github.com/ChitoseRaame/UrlPureFly/raw/refs/heads/master/UrlPureFly.user.js
 // @updateURL    https://github.com/ChitoseRaame/UrlPureFly/raw/refs/heads/master/UrlPureFly.user.js
+// @license      MIT
 // ==/UserScript==
 
 (function () {
